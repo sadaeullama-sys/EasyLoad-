@@ -1,9 +1,12 @@
+
 name: Build Android APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
 
 jobs:
   build:
@@ -25,42 +28,88 @@ jobs:
           flutter-version: '3.24.5'
           channel: stable
 
-      - name: Create Android Project
-        run: flutter create --project-name=easeload_shop_manager --platforms=android --org com.ilyasmobile .
+      - name: Configure Java
+        run: flutter config --jdk-dir="$JAVA_HOME"
 
-      - name: Set compatible Android Gradle and Kotlin versions
-        shell: bash
+      - name: Check Project Files
         run: |
-          python3 - <<'PYCODE'
-          from pathlib import Path
+          echo "Checking project files..."
+          test -f pubspec.yaml
+          test -f lib/main.dart
+          echo "Project files found."
+
+      - name: Prepare EasyLoad Assets
+        run: |
+          mkdir -p assets/provider_logos
+
+          if [ -f easyload_logo.png ]; then
+            cp easyload_logo.png assets/easyload_logo.png
+          fi
+
+          if [ ! -f assets/easyload_logo.png ]; then
+            echo "ERROR: EasyLoad logo is missing."
+            exit 1
+          fi
+
+          for f in ./*.png ./*.jpg ./*.jpeg ./*.webp; do
+            [ -f "$f" ] || continue
+            if [ "$(basename "$f")" != "easyload_logo.png" ]; then
+              cp "$f" assets/provider_logos/
+            fi
+          done
+
+          echo "Available provider logos:"
+          ls -la assets/provider_logos/
+          test -f assets/easyload_logo.png
+
+      - name: Create Android Project
+        run: |
+          rm -rf android
+          flutter create \
+            --project-name=easeload_shop_manager \
+            --platforms=android \
+            --org com.ilyasmobile .
+
+      - name: Set Android Gradle and Kotlin Versions
+        run: |
+          python3 - <<'PY'
           import re
 
-          settings = Path("android/settings.gradle")
-          s = settings.read_text()
-          s, n1 = re.subn(r'(id\s+["\']com\.android\.application["\']\s+version\s+["\'])[^"\']+(["\'])', r'\g<1>8.7.3\g<2>', s)
-          s, n2 = re.subn(r'(id\s+["\']org\.jetbrains\.kotlin\.android["\']\s+version\s+["\'])[^"\']+(["\'])', r'\g<1>2.1.0\g<2>', s)
-          settings.write_text(s)
-          print("Updated Android Gradle plugin entries:", n1, "Kotlin entries:", n2)
+          p = "android/settings.gradle"
+          with open(p, "r") as f:
+              s = f.read()
+
+          s = re.sub(
+              r'(id\s+["\']com\.android\.application["\']\s+version\s+)["\'][^"\']+["\']',
+              r'\g<1>"8.7.3"',
+              s
+          )
+
+          s = re.sub(
+              r'(id\s+["\']org\.jetbrains\.kotlin\.android["\']\s+version\s+)["\'][^"\']+["\']',
+              r'\g<1>"2.1.0"',
+              s
+          )
+
+          with open(p, "w") as f:
+              f.write(s)
+
           print(s)
+          PY
 
-          wrapper = Path("android/gradle/wrapper/gradle-wrapper.properties")
-          w = wrapper.read_text()
-          w = re.sub(r'gradle-[0-9.]+-(?:all|bin)\.zip', 'gradle-8.9-all.zip', w)
-          wrapper.write_text(w)
-          print(w)
-          PYCODE
+          mkdir -p android/gradle/wrapper
 
-      - name: Verify assets
+          sed -i \
+            's#distributionUrl=.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-8.9-all.zip#' \
+            android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Verify Android Versions
         run: |
-          test -f assets/easyload_logo.png
-          test -d assets/provider_logos
-          ls -la assets/provider_logos
+          cat android/settings.gradle
+          cat android/gradle/wrapper/gradle-wrapper.properties
 
       - name: Get Dependencies
         run: flutter pub get
-
-      - name: Generate App Launcher Icon
-        run: dart run flutter_launcher_icons
 
       - name: Build Release APK
         run: flutter build apk --release
@@ -70,3 +119,4 @@ jobs:
         with:
           name: EasyLoad-Shop-Manager-APK
           path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error

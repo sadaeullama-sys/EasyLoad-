@@ -1,0 +1,72 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: stable
+
+      - name: Create Android Project
+        run: flutter create --project-name=easeload_shop_manager --platforms=android --org com.ilyasmobile .
+
+      - name: Set compatible Android Gradle and Kotlin versions
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import re
+
+          settings = Path("android/settings.gradle")
+          s = settings.read_text()
+          s, n1 = re.subn(r'(id\s+["\']com\.android\.application["\']\s+version\s+["\'])[^"\']+(["\'])', r'\g<1>8.7.3\g<2>', s)
+          s, n2 = re.subn(r'(id\s+["\']org\.jetbrains\.kotlin\.android["\']\s+version\s+["\'])[^"\']+(["\'])', r'\g<1>2.1.0\g<2>', s)
+          settings.write_text(s)
+          print("Updated Android Gradle plugin entries:", n1, "Kotlin entries:", n2)
+          print(s)
+
+          wrapper = Path("android/gradle/wrapper/gradle-wrapper.properties")
+          w = wrapper.read_text()
+          w = re.sub(r'gradle-[0-9.]+-(?:all|bin)\.zip', 'gradle-8.9-all.zip', w)
+          wrapper.write_text(w)
+          print(w)
+          PYCODE
+
+      - name: Verify assets
+        run: |
+          test -f assets/easyload_logo.png
+          test -d assets/provider_logos
+          ls -la assets/provider_logos
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Generate App Launcher Icon
+        run: dart run flutter_launcher_icons
+
+      - name: Build Release APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: EasyLoad-Shop-Manager-APK
+          path: build/app/outputs/flutter-apk/app-release.apk

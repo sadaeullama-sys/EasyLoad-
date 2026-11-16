@@ -1,34 +1,93 @@
 
+name: Build Android APK
+
+'on':
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: stable
+
+      - name: Configure Java
+        run: flutter config --jdk-dir="$JAVA_HOME"
+
+      - name: Check Project Files
+        run: |
+          test -f pubspec.yaml
+          test -f lib/main.dart
+          echo "Project files found"
+
       - name: Prepare EasyLoad Assets
         shell: bash
         run: |
-          set -e
-
-          echo "Checking assets folders..."
-
-          mkdir -p assets
-
-          if [ -e assets/provider_logos ] && [ ! -d assets/provider_logos ]; then
-            rm -f assets/provider_logos
-          fi
-
-          if [ ! -d assets/provider_logos ]; then
-            mkdir assets/provider_logos
-          fi
+          mkdir -p assets/provider_logos
 
           if [ -f easyload_logo.png ]; then
             cp -f easyload_logo.png assets/easyload_logo.png
           fi
 
-          if [ -f assets/easyload_logo.png ]; then
-            echo "EasyLoad logo found."
-          else
-            echo "ERROR: EasyLoad logo missing."
-            ls -la
-            exit 1
-          fi
+          test -f assets/easyload_logo.png
+          echo "Logo found"
 
-          echo "Provider logo folder:"
-          ls -la assets/provider_logos
+      - name: Create Android Project
+        run: |
+          rm -rf android
+          flutter create --project-name=easeload_shop_manager --platforms=android --org com.ilyasmobile .
 
-          echo "Assets preparation completed."
+      - name: Set Kotlin and Gradle Versions
+        run: |
+          python3 - <<'PY'
+          import re
+
+          p = "android/settings.gradle"
+          s = open(p).read()
+
+          s = re.sub(
+              r'(id\s+["\']com\.android\.application["\']\s+version\s+)["\'][^"\']+["\']',
+              r'\g<1>"8.7.3"',
+              s
+          )
+
+          s = re.sub(
+              r'(id\s+["\']org\.jetbrains\.kotlin\.android["\']\s+version\s+)["\'][^"\']+["\']',
+              r'\g<1>"2.1.0"',
+              s
+          )
+
+          open(p, "w").write(s)
+          PY
+
+          sed -i 's#distributionUrl=.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-8.9-all.zip#' android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build Release APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: EasyLoad-Shop-Manager-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
